@@ -7,7 +7,7 @@ Production-ready monitoring service for tennis news that detects high-impact eve
 - `src/scrapers` - modular scraper layer with source configs and Playwright fallback.
 - `src/analyzers` - weighted keyword engine + entity extraction (player/tournament/rank).
 - `src/database` - SQLite schema, init, repository, dedupe and history tracking.
-- `src/telegram` - Telegram notifier (HTML mode, anti-spam via thresholds and dedupe).
+- `src/telegram` - Telegram notifier (HTML mode, anti-spam via thresholds and dedupe); optional `/start` / `/stop` subscriber list in SQLite, broadcast to all subscribers.
 - `src/engine` - async queue orchestration, cron cycles every 1-3 minutes.
 - `src/api` - operational REST API (`/health`, `/admin/stats`, `/alerts`).
 - `src/config` - env config, source registry, JSON keyword weights.
@@ -20,14 +20,14 @@ Production-ready monitoring service for tennis news that detects high-impact eve
 - URL + title duplicate prevention.
 - Player/tournament mute support.
 - 24h repeated-player mention tracking.
-- Telegram alert levels: `RED`, `YELLOW`, `BLUE`.
+- Telegram alert levels: `RED`, `YELLOW`, `BLUE`; multiple recipients via `/start` on the bot (stored in DB), plus optional fixed `TELEGRAM_CHAT_ID`.
 - Retry, rate limiting, queue concurrency, Playwright fallback.
 - Easy scaling to other sports by adding source configs and entity extractors.
 
 ## REST Endpoints
 
 - `GET /health` - liveness probe.
-- `GET /admin/stats` - total articles, alerts, processed URLs.
+- `GET /admin/stats` - total articles, alerts, processed URLs, Telegram `/start` subscriber count.
 - `GET /alerts?limit=20` - latest sent alerts.
 
 ## Quick Start (Windows)
@@ -36,15 +36,23 @@ Production-ready monitoring service for tennis news that detects high-impact eve
    - `.env.example` -> `.env`
 2. Set values in `.env`:
    - `TELEGRAM_BOT_TOKEN`
-   - `TELEGRAM_CHAT_ID`
-3. Start everything:
+   - Optional `TELEGRAM_CHAT_ID` (extra fixed recipient; can be empty if everyone uses `/start`)
+3. Open your bot in Telegram and send **`/start`** for each user who should receive alerts (`/stop` to unsubscribe).
+4. Start everything:
    - `start-all.bat`
+
+## Telegram recipients
+
+- Set `TELEGRAM_BOT_TOKEN` in `.env`. Each user who should get alerts opens the bot and sends **`/start`** (saved in `telegram_subscribers` in SQLite under `./data`). **`/stop`** unsubscribes.
+- Optional: set `TELEGRAM_CHAT_ID` to also deliver to one extra chat (user, group, or channel id). Leave empty if only `/start` subscribers should receive alerts.
+- Run **only one** container/process polling this bot token (otherwise Telegram may return conflicts). If you ever set a **webhook** for this bot, clear it or `getUpdates` will stay empty:  
+  `curl "https://api.telegram.org/bot<TOKEN>/deleteWebhook"`
 
 ## Docker Start
 
 ```bash
 cp .env.example .env
-# edit .env values
+# edit .env values (at minimum TELEGRAM_BOT_TOKEN; then /start in Telegram)
 docker compose up --build -d
 ```
 
@@ -60,7 +68,7 @@ sudo usermod -aG docker "$USER"
 git clone https://github.com/meghryan2014-source/tennis.git
 cd tennis
 cp .env.example .env
-nano .env   # TELEGRAM_*, PORT, etc. — never commit .env
+nano .env   # TELEGRAM_BOT_TOKEN required; TELEGRAM_CHAT_ID optional; PORT, etc. — never commit .env
 chmod +x scripts/vps-deploy.sh
 docker compose up -d --build
 ```

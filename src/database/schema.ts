@@ -39,4 +39,12 @@ export const ensureSchema = async (): Promise<void> => {
       UNIQUE(entity_type, entity_value)
     );
   `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS telegram_subscribers (
+      chat_id TEXT PRIMARY KEY,
+      username TEXT,
+      subscribed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
 };

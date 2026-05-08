@@ -83,18 +83,49 @@ export const repository = {
     );
   },
 
-  async getStats(): Promise<{ articles: number; alerts: number; processedUrls: number }> {
-    const [articles, alerts, processedUrls] = await Promise.all([
+  async getStats(): Promise<{
+    articles: number;
+    alerts: number;
+    processedUrls: number;
+    telegramSubscribers: number;
+  }> {
+    const [articles, alerts, processedUrls, telegramSubscribers] = await Promise.all([
       get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM articles"),
       get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM articles WHERE notified = 1"),
-      get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM processed_urls")
+      get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM processed_urls"),
+      get<{ cnt: number }>("SELECT COUNT(*) as cnt FROM telegram_subscribers")
     ]);
 
     return {
       articles: articles?.cnt ?? 0,
       alerts: alerts?.cnt ?? 0,
-      processedUrls: processedUrls?.cnt ?? 0
+      processedUrls: processedUrls?.cnt ?? 0,
+      telegramSubscribers: telegramSubscribers?.cnt ?? 0
     };
+  },
+
+  async listTelegramSubscriberChatIds(): Promise<string[]> {
+    const rows = await all<{ chat_id: string }>(
+      "SELECT chat_id FROM telegram_subscribers ORDER BY datetime(subscribed_at) ASC"
+    );
+    return rows.map((r) => r.chat_id);
+  },
+
+  async upsertTelegramSubscriber(chatId: string, username: string | null): Promise<void> {
+    await run(
+      `
+      INSERT INTO telegram_subscribers (chat_id, username, subscribed_at)
+      VALUES (?, ?, datetime('now'))
+      ON CONFLICT(chat_id) DO UPDATE SET
+        username = excluded.username,
+        subscribed_at = datetime('now')
+      `,
+      [chatId, username]
+    );
+  },
+
+  async removeTelegramSubscriber(chatId: string): Promise<void> {
+    await run("DELETE FROM telegram_subscribers WHERE chat_id = ?", [chatId]);
   },
 
   async dedupeByTitleAndSource(item: ScrapedArticle): Promise<boolean> {

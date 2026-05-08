@@ -1,5 +1,6 @@
 import axios from "axios";
 import { env } from "../config/env";
+import { repository } from "../database/repository";
 import { AnalyzedArticle } from "../types";
 import { logger } from "../utils/logger";
 
@@ -22,24 +23,26 @@ export class TelegramNotifier {
   private readonly enabled: boolean;
 
   constructor() {
-    this.enabled = Boolean(env.telegramBotToken && env.telegramChatId);
+    this.enabled = Boolean(env.telegramBotToken);
   }
 
   async sendAlert(article: AnalyzedArticle, playerMentions24h: number): Promise<boolean> {
     if (!this.enabled) return false;
 
-    const chatId = String(env.telegramChatId).trim();
-    const botId = botUserIdFromToken(env.telegramBotToken);
-    if (botId && chatId === botId) {
-      logger.error(
-        {
-          hint: "TELEGRAM_CHAT_ID must be your personal user id (from @userinfobot), or a group/channel id — not the bot id from the token."
-        },
-        "Invalid TELEGRAM_CHAT_ID: matches bot id; Telegram forbids a bot messaging itself"
+    const subscriberIds = await repository.listTelegramSubscriberChatIds();
+    const legacyId = env.telegramChatId?.trim();
+    const recipientSet = new Set<string>(subscriberIds);
+    if (legacyId) recipientSet.add(legacyId);
+    const recipients = [...recipientSet];
+
+    if (recipients.length === 0) {
+      logger.warn(
+        "No Telegram recipients: users must send /start to the bot, or set TELEGRAM_CHAT_ID in .env"
       );
       return false;
     }
 
+    const botId = botUserIdFromToken(env.telegramBotToken);
     const message = [
       `🚨 <b>Tennis Alert</b>`,
       `${levelEmoji[article.alertLevel]} <b>Alert Type:</b> ${article.alertLevel}`,
@@ -55,25 +58,37 @@ export class TelegramNotifier {
     ].join("\n");
 
     const url = `https://api.telegram.org/bot${env.telegramBotToken}/sendMessage`;
-    try {
-      await axios.post(url, {
-        chat_id: env.telegramChatId,
-        text: message,
-        parse_mode: env.telegramParseMode,
-        disable_web_page_preview: false
-      });
-    } catch (err: unknown) {
-      if (axios.isAxiosError(err) && err.response?.data) {
+    let anyOk = false;
+    for (const chatId of recipients) {
+      if (botId && chatId === botId) {
         logger.error(
-          { status: err.response.status, data: err.response.data },
-          "Telegram sendMessage failed"
+          {
+            hint: "Recipient chat_id must not be the bot id from the token."
+          },
+          "Skipping invalid Telegram recipient: matches bot id"
         );
-      } else {
-        logger.error({ err }, "Telegram sendMessage failed");
+        continue;
       }
-      return false;
+      try {
+        await axios.post(url, {
+          chat_id: chatId,
+          text: message,
+          parse_mode: env.telegramParseMode,
+          disable_web_page_preview: false
+        });
+        anyOk = true;
+      } catch (err: unknown) {
+        if (axios.isAxiosError(err) && err.response?.data) {
+          logger.error(
+            { status: err.response.status, data: err.response.data, chatId },
+            "Telegram sendMessage failed"
+          );
+        } else {
+          logger.error({ err, chatId }, "Telegram sendMessage failed");
+        }
+      }
     }
 
-    return true;
+    return anyOk;
   }
 }

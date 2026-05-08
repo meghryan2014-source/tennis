@@ -4,11 +4,13 @@ import "./database/db";
 import { createApiServer } from "./api/server";
 import { ensureSchema } from "./database/schema";
 import { MonitorEngine } from "./engine/monitorEngine";
+import { startTelegramUpdatePoller } from "./telegram/updatePoller";
 import { logger } from "./utils/logger";
 
 const bootstrap = async (): Promise<void> => {
   await ensureSchema();
   const app = createApiServer();
+  startTelegramUpdatePoller();
   const engine = new MonitorEngine();
   engine.start();
 

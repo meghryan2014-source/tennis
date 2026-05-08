@@ -1,0 +1,13 @@
+version: "3.9"
+services:
+  tennis-monitor:
+    build: .
+    container_name: tennis-monitor
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped

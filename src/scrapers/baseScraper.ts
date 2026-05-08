@@ -48,8 +48,21 @@ export class BaseScraper {
     return articles;
   }
 
+  /** Article pages often block plain HTTP even when the listing was loaded via Playwright. */
+  private async fetchArticleHtml(url: string): Promise<string> {
+    try {
+      return await fetchWithRetry(url);
+    } catch (error) {
+      if (!env.enablePlaywrightFallback || !this.source.fallbackToPlaywright) {
+        throw error;
+      }
+      logger.debug({ source: this.source.name, url }, "HTTP failed for article, switching to Playwright");
+      return await this.fetchWithPlaywright(url);
+    }
+  }
+
   private async fetchSingleArticle(url: string): Promise<ScrapedArticle> {
-    const html = await fetchWithRetry(url);
+    const html = await this.fetchArticleHtml(url);
     const $ = cheerio.load(html);
 
     const title = $(this.source.titleSelector).first().text().trim();

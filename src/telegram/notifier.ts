@@ -19,6 +19,8 @@ const levelEmoji: Record<string, string> = {
 const escapeHtml = (input: string): string =>
   input.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
 export class TelegramNotifier {
   private readonly enabled: boolean;
 
@@ -57,38 +59,62 @@ export class TelegramNotifier {
       `<a href="${article.url}">Open article</a>`
     ].join("\n");
 
-    const url = `https://api.telegram.org/bot${env.telegramBotToken}/sendMessage`;
-    let anyOk = false;
-    for (const chatId of recipients) {
+    const sendUrl = `https://api.telegram.org/bot${env.telegramBotToken}/sendMessage`;
+    const payload = {
+      text: message,
+      parse_mode: env.telegramParseMode,
+      disable_web_page_preview: false
+    };
+
+    const validRecipients = recipients.filter((chatId) => {
       if (botId && chatId === botId) {
         logger.error(
-          {
-            hint: "Recipient chat_id must not be the bot id from the token."
-          },
+          { hint: "Recipient chat_id must not be the bot id from the token." },
           "Skipping invalid Telegram recipient: matches bot id"
         );
-        continue;
+        return false;
       }
-      try {
-        await axios.post(url, {
-          chat_id: chatId,
-          text: message,
-          parse_mode: env.telegramParseMode,
-          disable_web_page_preview: false
-        });
-        anyOk = true;
-      } catch (err: unknown) {
-        if (axios.isAxiosError(err) && err.response?.data) {
-          logger.error(
-            { status: err.response.status, data: err.response.data, chatId },
-            "Telegram sendMessage failed"
-          );
-        } else {
-          logger.error({ err, chatId }, "Telegram sendMessage failed");
+      return true;
+    });
+
+    if (validRecipients.length === 0) return false;
+
+    // Dedupe in the engine is per URL, not per chat: one processArticle → one broadcast.
+    // Retry only failed chats (multi-round) so one user's success does not "consume" the article for others.
+    const maxRounds = 5;
+    let pending = [...validRecipients];
+
+    for (let round = 0; round < maxRounds && pending.length > 0; round += 1) {
+      if (round > 0) {
+        await sleep(800 * round);
+      }
+      const stillFailed: string[] = [];
+      for (const chatId of pending) {
+        try {
+          await axios.post(sendUrl, { ...payload, chat_id: chatId });
+        } catch (err: unknown) {
+          if (axios.isAxiosError(err) && err.response?.data) {
+            logger.error(
+              { status: err.response.status, data: err.response.data, chatId, round },
+              "Telegram sendMessage failed"
+            );
+          } else {
+            logger.error({ err, chatId, round }, "Telegram sendMessage failed");
+          }
+          stillFailed.push(chatId);
         }
       }
+      pending = stillFailed;
     }
 
-    return anyOk;
+    if (pending.length > 0) {
+      logger.error(
+        { chatIds: pending, articleUrl: article.url },
+        "Telegram broadcast incomplete: some recipients failed after retries"
+      );
+      return false;
+    }
+
+    return true;
   }
 }

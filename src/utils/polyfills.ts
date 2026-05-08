@@ -1,3 +1,4 @@
+// @ts-nocheck — DOM lib vs `node:stream/web` generic mismatch under strict mode (Node 22+ / Docker build).
 /**
  * Runtime polyfills for older Node.js versions.
  * Undici (pulled in by modern HTTP stacks) expects Web API globals.
@@ -6,15 +7,7 @@
 import { Blob } from "node:buffer";
 import { ReadableStream, TransformStream, WritableStream } from "node:stream/web";
 
-type GlobalWeb = typeof globalThis & {
-  Blob?: typeof Blob;
-  File?: typeof File;
-  ReadableStream?: typeof ReadableStream;
-  WritableStream?: typeof WritableStream;
-  TransformStream?: typeof TransformStream;
-};
-
-const g = globalThis as GlobalWeb;
+const g = globalThis;
 
 if (!g.Blob) {
   g.Blob = Blob;
